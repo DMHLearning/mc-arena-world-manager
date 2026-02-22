@@ -28,7 +28,7 @@ public class ArenaWorldManagerPlugin extends JavaPlugin {
 
         this.api = new ArenaWorldManager(
                 limiter, schematicService, wgService, fsService, cleaner,
-                getServer().getWorldContainer().toPath()
+                getServer().getWorldContainer().toPath(), registry
         );
 
         ArenaCommand arenaCommand = new ArenaCommand(this.api, registry);
