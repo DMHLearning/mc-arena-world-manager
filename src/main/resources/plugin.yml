@@ -1,0 +1,11 @@
+name: ArenaWorldManagerPlugin
+version: '1.0.0'
+main: dev.denismasterherobrine.arenaworldmanager.ArenaWorldManagerPlugin
+api-version: '1.21'
+load: STARTUP
+authors: [ DenisMasterHerobrine ]
+commands:
+  awm:
+    description: Главная команда управления инфраструктурой арен
+    permission: arena.worldmanager.admin
+    usage: /<command> <action>
