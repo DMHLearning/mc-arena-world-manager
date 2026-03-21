@@ -50,7 +50,7 @@ public class EntityCleanerService {
     private boolean shouldRemove(Entity entity, EntityCleanupPolicy policy) {
         if (entity instanceof Player) return false;
         return (policy.removeItems() && entity instanceof Item) ||
-                (policy.removeMonsters() && entity instanceof Monster && entity instanceof Animals && entity instanceof Bat) ||
+                (policy.removeMonsters() && entity instanceof Monster) ||
                 (policy.removeProjectiles() && entity instanceof Projectile) ||
                 (policy.removeVehicles() && entity instanceof Vehicle);
     }

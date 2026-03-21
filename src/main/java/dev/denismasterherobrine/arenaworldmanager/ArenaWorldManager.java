@@ -6,6 +6,9 @@ import dev.denismasterherobrine.arenaworldmanager.api.model.EntityCleanupPolicy;
 import dev.denismasterherobrine.arenaworldmanager.api.model.RegionDefinition;
 import dev.denismasterherobrine.arenaworldmanager.api.model.RestorationMethod;
 import dev.denismasterherobrine.arenaworldmanager.config.MapConfigRegistry;
+import dev.denismasterherobrine.arenaworldmanager.event.ArenaResetCompletedEvent;
+import dev.denismasterherobrine.arenaworldmanager.event.ArenaResetFailedEvent;
+import dev.denismasterherobrine.arenaworldmanager.event.ArenaResetStartedEvent;
 import dev.denismasterherobrine.arenaworldmanager.service.EntityCleanerService;
 import dev.denismasterherobrine.arenaworldmanager.service.FileSystemService;
 import dev.denismasterherobrine.arenaworldmanager.service.SchematicService;
@@ -71,7 +74,7 @@ public class ArenaWorldManager implements ArenaWorldAPI {
 
         return fileSystemService.copyFolder(source, target).thenRun(() -> {
             // Регистрация мира в Bukkit после копирования файлов
-            Bukkit.getGlobalRegionScheduler().execute(null, () -> {
+            Bukkit.getGlobalRegionScheduler().execute(ArenaWorldManagerPlugin.getPlugin(ArenaWorldManagerPlugin.class), () -> {
                 Bukkit.createWorld(new WorldCreator(arenaId));
             });
         });
@@ -134,16 +137,16 @@ public class ArenaWorldManager implements ArenaWorldAPI {
 
     @Override
     public CompletableFuture<Void> resetArena(String arenaId) {
+        long startMs = System.currentTimeMillis();
+        Bukkit.getPluginManager().callEvent(new ArenaResetStartedEvent(arenaId));
+
         return limiter.submit(() -> {
             activeArenas.remove(arenaId);
             CompletableFuture<Void> future = new CompletableFuture<>();
 
-            // Выгрузка мира должна быть в главном потоке
             Bukkit.getGlobalRegionScheduler().execute(ArenaWorldManagerPlugin.getPlugin(ArenaWorldManagerPlugin.class), () -> {
                 World world = Bukkit.getWorld(arenaId);
                 if (world != null) {
-                    // Телепортируем игроков в лобби перед выгрузкой
-                    // TODO: Отправить в лобби, а не на спавн первого мира
                     world.getPlayers().forEach(p -> p.teleport(Bukkit.getWorlds().get(0).getSpawnLocation()));
                     Bukkit.unloadWorld(world, false);
                 }
@@ -151,11 +154,21 @@ public class ArenaWorldManager implements ArenaWorldAPI {
                 try {
                     fileSystemService.deleteFolder(containerPath.resolve(arenaId));
                 } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    future.completeExceptionally(e);
+                    return;
                 }
+
+                future.complete(null);
             });
 
             return future;
+        }).whenComplete((v, ex) -> {
+            long durationMs = System.currentTimeMillis() - startMs;
+            if (ex != null) {
+                Bukkit.getPluginManager().callEvent(new ArenaResetFailedEvent(arenaId, ex.getMessage()));
+            } else {
+                Bukkit.getPluginManager().callEvent(new ArenaResetCompletedEvent(arenaId, durationMs));
+            }
         });
     }
 
