@@ -9,3 +9,7 @@ commands:
     description: Главная команда управления инфраструктурой арен
     permission: arena.worldmanager.admin
     usage: /<command> <action>
+permissions:
+  arena.worldmanager.admin:
+    default: op
+    description: Administrative access to ArenaWorldManager commands

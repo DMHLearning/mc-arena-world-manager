@@ -5,6 +5,7 @@ import dev.denismasterherobrine.arenaworldmanager.api.model.ArenaMapConfig;
 import dev.denismasterherobrine.arenaworldmanager.api.model.EntityCleanupPolicy;
 import dev.denismasterherobrine.arenaworldmanager.api.model.RegionDefinition;
 import dev.denismasterherobrine.arenaworldmanager.api.model.RestorationMethod;
+import dev.denismasterherobrine.arenaworldmanager.runtime.RuntimeFlags;
 import dev.denismasterherobrine.arenaworldmanager.config.MapConfigRegistry;
 import dev.denismasterherobrine.arenaworldmanager.event.ArenaResetCompletedEvent;
 import dev.denismasterherobrine.arenaworldmanager.event.ArenaResetFailedEvent;
@@ -58,7 +59,16 @@ public class ArenaWorldManager implements ArenaWorldAPI {
 
     @Override
     public CompletableFuture<Void> prepareArena(String arenaId, ArenaMapConfig config) {
-        return limiter.submit(() -> {
+        if (RuntimeFlags.prepareGateClosed) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("[chaos] prepareArena paused (prepareGateClosed=true)"));
+        }
+        if (RuntimeFlags.FAIL_NEXT_PREPARE.remove(arenaId)) {
+            return CompletableFuture.failedFuture(
+                    new RuntimeException("[chaos] injected prepareArena failure for arena_id=" + arenaId));
+        }
+        long extraDelay = RuntimeFlags.extraPrepareDelayMs;
+        CompletableFuture<Void> prep = limiter.submit(() -> {
             activeArenas.put(arenaId, config);
             if (config.restorationMethod() == RestorationMethod.WORLD_CLONE) {
                 return restoreViaClone(arenaId, config);
@@ -66,6 +76,21 @@ public class ArenaWorldManager implements ArenaWorldAPI {
                 return restoreViaSchematic(arenaId, config);
             }
         }).thenCompose(v -> applyPostRestore(arenaId, config));
+        if (extraDelay > 0) {
+            return prep.thenCompose(v -> sleepAsync(extraDelay));
+        }
+        return prep;
+    }
+
+    private static CompletableFuture<Void> sleepAsync(long ms) {
+        CompletableFuture<Void> f = new CompletableFuture<>();
+        Thread t = new Thread(() -> {
+            try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
+            f.complete(null);
+        }, "awm-chaos-delay");
+        t.setDaemon(true);
+        t.start();
+        return f;
     }
 
     private CompletableFuture<Void> restoreViaClone(String arenaId, ArenaMapConfig config) {
@@ -140,6 +165,13 @@ public class ArenaWorldManager implements ArenaWorldAPI {
         long startMs = System.currentTimeMillis();
         Bukkit.getPluginManager().callEvent(new ArenaResetStartedEvent(arenaId));
 
+        if (RuntimeFlags.FAIL_NEXT_RESET.remove(arenaId)) {
+            RuntimeException err = new RuntimeException(
+                    "[chaos] injected resetArena failure for arena_id=" + arenaId);
+            Bukkit.getPluginManager().callEvent(new ArenaResetFailedEvent(arenaId, err.getMessage()));
+            return CompletableFuture.failedFuture(err);
+        }
+
         return limiter.submit(() -> {
             activeArenas.remove(arenaId);
             CompletableFuture<Void> future = new CompletableFuture<>();
@@ -167,6 +199,10 @@ public class ArenaWorldManager implements ArenaWorldAPI {
             if (ex != null) {
                 Bukkit.getPluginManager().callEvent(new ArenaResetFailedEvent(arenaId, ex.getMessage()));
             } else {
+                long extraDelay = RuntimeFlags.extraResetDelayMs;
+                if (extraDelay > 0) {
+                    try { Thread.sleep(extraDelay); } catch (InterruptedException ignored) {}
+                }
                 Bukkit.getPluginManager().callEvent(new ArenaResetCompletedEvent(arenaId, durationMs));
             }
         });
@@ -174,6 +210,10 @@ public class ArenaWorldManager implements ArenaWorldAPI {
 
     @Override
     public CompletableFuture<Void> instantCleanup(String arenaId) {
+        if (RuntimeFlags.SKIP_NEXT_CLEANUP.remove(arenaId)) {
+            return CompletableFuture.completedFuture(null);
+        }
+
         World world = Bukkit.getWorld(arenaId);
         if (world == null) return CompletableFuture.completedFuture(null);
 

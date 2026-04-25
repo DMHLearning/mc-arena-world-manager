@@ -1,0 +1,5 @@
+supervisor-relay:
+  enabled: true
+  bind-host: "127.0.0.1"
+  port: 9850
+  bearer-token: "change-me"
